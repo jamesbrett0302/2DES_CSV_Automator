@@ -1,0 +1,78 @@
+Display.SelectFileDialog.SelectFile Title: $fx'Select data file' InitialDirectory: $fx'C:\\Users' IsTopMost: False CheckIfFileExists: False SelectedFile=> SelectedFile ButtonPressed=> ButtonPressed
+File.GetPathPart File: $fx'=SelectedFile' FileNameWithoutExtension=> DataFileName
+@@CustomNote: 'Select your data file'
+Excel.LaunchExcel.LaunchAndOpenUnderExistingProcess Path: $fx'=SelectedFile' Visible: True ReadOnly: False UseMachineLocale: False Instance=> DataFile
+DateTime.GetCurrentDateTime.Local DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> StartTime
+@@CustomNote: 'Set these variables for each experiment'
+SET FirstSampleRow TO $fx'36'
+SET LastSampleRow TO $fx'75'
+SET RowsPerScan TO $fx'69'
+SET EmissionPointCount TO $fx'115'
+SET PointsDiscardedPerScan TO $fx'3'
+SET FirstExcitationRow TO $fx'21'
+SET LastExcitationRow TO $fx'2643'
+SET OutputFolder TO $fx'C:\\Users\\'
+SET NumberOfScans TO $fx'=Int(((LastExcitationRow - FirstExcitationRow) / RowsPerScan) + 1)'
+SET EmissionEndColumn TO $fx'=EmissionPointCount + 1'
+@@CustomNote: 'To do multiple samples in one run start from your first sample row and end at your last sample row'
+LOOP SampleRow FROM $fx'=Value(FirstSampleRow)' TO $fx'=Value(LastSampleRow)' STEP $fx'=1'
+    @@CustomNote: 'Value = your first row of data'
+SET RowCounter TO $fx'=SampleRow'
+    SET LastDataRowForSample TO $fx'=SampleRow + (NumberOfScans - 1) * RowsPerScan'
+    @@CustomNote: 'Value = First row where data is pasted'
+SET DestinationRow TO $fx'2'
+    SET DestinationColumn TO $fx'2'
+    SET ColumnsToRead TO $fx'=EmissionPointCount'
+    @@CustomNote: 'Opens an excel file where the data will pasted'
+Excel.LaunchExcel.LaunchUnderExistingProcess Visible: True UseMachineLocale: False Instance=> csv
+    Excel.ReadFromExcel.ReadCell Instance: $fx'=DataFile' StartColumn: $fx'1' StartRow: $fx'=RowCounter' GetCellContentsMode: Excel.GetCellContentsMode.TypedValues CellValue=> SampleName
+    Excel.SaveExcel.SaveAs Instance: $fx'=csv' DocumentFormat: Excel.ExcelFormat.CSV DocumentPath: $fx'${OutputFolder}\\${SampleName}'
+    @@CustomNote: 'Row of first excitation wavelength'
+SET ExcitationRow TO $fx'=FirstExcitationRow'
+    @@CustomNote: 'Column of excitation wavelength destination'
+SET ExcitationDestination TO $fx'2'
+    Excel.ReadFromExcel.ReadCells Instance: $fx'=DataFile' StartColumn: $fx'2' StartRow: $fx'35' EndColumn: $fx'=EmissionEndColumn' EndRow: $fx'35' GetCellContentsMode: Excel.GetCellContentsMode.TypedValues FirstLineIsHeader: False RangeValue=> EmissionWavelengths
+    Variables.CreateNewList List=> EmissionWavelengthsList
+    LOOP LoopIndex FROM 1 TO 115 STEP 1
+        Variables.AddItemToList Item: $fx'=ReadCell(EmissionWavelengths, 1, LoopIndex)' List: $fx'=EmissionWavelengthsList'
+    END
+    Excel.WriteToExcel.WriteCell Instance: $fx'=csv' Value: $fx'=EmissionWavelengthsList' Column: $fx'1' Row: $fx'2'
+    Excel.ReadFromExcel.ReadCells Instance: $fx'=DataFile' StartColumn: $fx'5' StartRow: $fx'=FirstExcitationRow' EndColumn: $fx'5' EndRow: $fx'=LastExcitationRow' GetCellContentsMode: Excel.GetCellContentsMode.TypedValues FirstLineIsHeader: False RangeValue=> ExcitationWavelengths
+    LOOP Index FROM 1 TO 39 STEP 1
+        Excel.WriteToExcel.WriteCell Instance: $fx'=csv' Value: $fx'=ReadCell(ExcitationWavelengths, (Index - 1) * RowsPerScan + 1, 1)' Column: $fx'=ExcitationDestination + Index - 1' Row: $fx'1'
+    END
+    @@CustomNote: 'Loop through each scan for this sample'
+LOOP WHILE $fx'=Value(RowCounter) <= Value(LastDataRowForSample)'
+        SET DataEndColumn TO $fx'=ColumnsToRead + 1'
+        Excel.ReadFromExcel.ReadCells Instance: $fx'=DataFile' StartColumn: $fx'2' StartRow: $fx'=RowCounter' EndColumn: $fx'=DataEndColumn' EndRow: $fx'=RowCounter' GetCellContentsMode: Excel.GetCellContentsMode.TypedValues FirstLineIsHeader: False RangeValue=> ExcelData
+        Variables.CreateNewList List=> VerticalList
+        LOOP CellIndex FROM 1 TO 115 STEP 1
+            IF $fx'=Value(CellIndex) <= Value(ColumnsToRead)' THEN
+                IF $fx'=ReadCell(ExcelData, 1, CellIndex) = "OVER"' THEN
+                    SET CellValue TO $fx'1000000'
+                ELSE
+                    IF $fx'=ReadCell(ExcelData, 1, CellIndex)<0' THEN
+                        SET CellValue TO $fx'0'
+                    ELSE
+                        SET CellValue TO $fx'=ReadCell(ExcelData, 1, CellIndex)'
+                    END
+                END
+                Variables.AddItemToList Item: $fx'=CellValue' List: $fx'=VerticalList'
+            END
+        END
+        Excel.WriteToExcel.WriteCell Instance: $fx'=csv' Value: $fx'=VerticalList' Column: $fx'=DestinationColumn' Row: $fx'=DestinationRow'
+        @@CustomNote: 'Value = number of rows between your data in each scan'
+Variables.IncreaseVariable Value: $fx'=RowCounter' IncrementValue: $fx'=RowsPerScan'
+        Variables.IncreaseVariable Value: $fx'=DestinationRow' IncrementValue: $fx'=PointsDiscardedPerScan'
+        @@CustomNote: 'Value is always 1 to have a compact table'
+Variables.IncreaseVariable Value: $fx'=DestinationColumn' IncrementValue: $fx'1'
+        Variables.DecreaseVariable Value: $fx'=ColumnsToRead' DecrementValue: $fx'=PointsDiscardedPerScan'
+    END
+    Excel.SaveExcel.Save Instance: $fx'=csv'
+    Excel.CloseExcel.Close Instance: $fx'=csv'
+END
+DateTime.GetCurrentDateTime.Local DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> EndTime
+DateTime.Subtract FromDate: $fx'=EndTime' SubstractDate: $fx'=StartTime' TimeUnit: DateTime.DifferenceTimeUnit.Seconds TimeDifference=> TimeDifference
+SET Minutes TO $fx'=Int(TimeDifference/60)'
+SET Seconds TO $fx'=Int(Mod(TimeDifference, 60))'
+Display.ShowMessageDialog.ShowMessage Message: $fx'Time taken: ${Minutes} minutes and ${Seconds} seconds' Icon: Display.Icon.None Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: False ButtonPressed=> ButtonPressed2
